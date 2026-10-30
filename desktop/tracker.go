@@ -282,13 +282,31 @@ func (tr *Tracker) untrackWindow(w xproto.Window) bool {
 	c.Restore(store.Latest)
 
 	// Remove client
-	ws.RemoveClient(c)
+	tr.removeClient(c)
 	delete(tr.Clients, w)
 
-	// Tile workspace
-	tr.Tile(ws)
-
 	return true
+}
+
+func (tr *Tracker) removeClient(c *store.Client) bool {
+	master := false
+
+	// Remove client from all workspaces
+	for _, ws := range tr.Workspaces {
+		mg := ws.ActiveLayout().GetManager()
+		if !mg.IsMaster(c) && !mg.IsSlave(c) {
+			continue
+		}
+		master = master || mg.IsMaster(c)
+		ws.RemoveClient(c)
+
+		// Tile workspace
+		if ws.TilingEnabled() {
+			tr.Tile(ws)
+		}
+	}
+
+	return master
 }
 
 func (tr *Tracker) handleMaximizedClient(c *store.Client) {
@@ -470,15 +488,7 @@ func (tr *Tracker) handleWorkspaceChange(h *Handler) {
 	log.Debug("Client workspace handler fired [", c.Latest.Class, "]")
 
 	// Remove client from current workspace
-	ws := tr.ClientWorkspace(c)
-	mg := ws.ActiveLayout().GetManager()
-	master := mg.IsMaster(c)
-	ws.RemoveClient(c)
-
-	// Tile current workspace
-	if ws.TilingEnabled() {
-		tr.Tile(ws)
-	}
+	master := tr.removeClient(c)
 
 	// Update client desktop and screen
 	if !tr.isTrackable(c.Window.Id) {
@@ -487,11 +497,11 @@ func (tr *Tracker) handleWorkspaceChange(h *Handler) {
 	c.Update()
 
 	// Add client to new workspace
-	ws = tr.ClientWorkspace(c)
+	ws := tr.ClientWorkspace(c)
 	if tr.Handlers.SwapScreen.Active() && target.TilingEnabled() {
 		ws = target
 	}
-	mg = ws.ActiveLayout().GetManager()
+	mg := ws.ActiveLayout().GetManager()
 	ws.AddClient(c)
 	if master {
 		mg.MakeMaster(c)
